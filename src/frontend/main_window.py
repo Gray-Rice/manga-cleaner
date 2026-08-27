@@ -296,7 +296,7 @@ class MainWindow(QMainWindow):
         
         if tool == "NONE":
             self.canvas.setDragMode(QGraphicsView.ScrollHandDrag)
-            self.canvas.viewport().unsetCursor() # Let ScrollHandDrag manage the open hand icon
+            self.canvas.viewport().unsetCursor()
             self.canvas.cursor_item.hide()
             self.tools.buttons["MOVE"].setChecked(True)
             self.mode_lbl.setText("MODE: MOVING")
@@ -307,13 +307,13 @@ class MainWindow(QMainWindow):
             
             if tool in ["BRUSH", "ERASER"]:
                 if not self.canvas.is_locked:
-                    self.canvas.viewport().setCursor(Qt.BlankCursor) # Hide native system cursor
-                    self.canvas.cursor_item.show()
+                    self.canvas.viewport().setCursor(Qt.BlankCursor)
+                    self.cursor_item.show()
                 else:
                     self.canvas.viewport().unsetCursor()
             else:
                 if not self.canvas.is_locked:
-                    self.canvas.viewport().setCursor(Qt.CrossCursor) # Use crosshair for selection tools
+                    self.canvas.viewport().setCursor(Qt.CrossCursor)
                 else:
                     self.canvas.viewport().unsetCursor()
                 self.canvas.cursor_item.hide()
@@ -403,7 +403,7 @@ class MainWindow(QMainWindow):
             item = self.file_list.item(i)
             file_path = item.data(Qt.UserRole)
             is_locked = (file_path in locked_paths)
-            item.setData(Qt.UserRole + 2, is_locked) # Apply lock data to trigger icon repaint
+            item.setData(Qt.UserRole + 2, is_locked)
 
         # 5. Lock/Unlock the main interactive Canvas if we're looking at a locked file
         if self.current_img_path:
@@ -451,18 +451,15 @@ class MainWindow(QMainWindow):
 
         if not self.task_queue:
             self._update_queue_ui()
-            if not self.is_batching:
-                get_pool().submit(_run_flush_process, False)
+            # Models stay resident in VRAM for instant subsequent inferences
             return
 
         item = self.task_queue.pop(0)
- 
         source_path = item["path"]
         
-        # --- Update status to WAITING since AI is processing it now ---
+        # Update status to WAITING since AI is processing it now
         self.page_states[source_path] = PageState.WAITING
         self.file_list.update_item_state(source_path, "waiting")
-        # --------------------------------------------------------------
 
         self.setCursor(Qt.WaitCursor)
         self.worker_thread = QThread()
@@ -478,8 +475,6 @@ class MainWindow(QMainWindow):
         self.worker_thread.finished.connect(self.worker_thread.deleteLater)
 
         self.worker_thread.start()
-        
-        # Call this AFTER thread initialization to lock the canvas safely!
         self._update_queue_ui() 
 
     def stop_thread(self):
@@ -502,7 +497,6 @@ class MainWindow(QMainWindow):
         self.total_lama_tasks = 0
         self.completed_lama_tasks = 0
         self._update_queue_ui()
-        get_pool().submit(_run_flush_process, False).result()
         QMessageBox.critical(self, "Hardware Error", message)
 
     def on_task_finished(self, result, patches):
@@ -510,11 +504,9 @@ class MainWindow(QMainWindow):
         source_path = getattr(self.worker, 'source_path', self.current_img_path)
         is_active = (source_path == self.current_img_path)
 
-        # --- Flag file accurately on completion ---
         new_state = PageState.READY if task == "clean" else PageState.MODIFIED
         self.page_states[source_path] = new_state
         self.file_list.update_item_state(source_path, new_state.name.lower())
-        # ------------------------------------------
 
         if task == "clean":
             self.completed_lama_tasks += 1
@@ -549,7 +541,7 @@ class MainWindow(QMainWindow):
                 final_img = self.canvas.cv_img if is_active else self.image_sessions[source_path]["img"]
                 is_last = self.batch_engine.save_current(final_img)
                 if is_last: self.finalize_batch()
-                else: self.step_batch() # Chain the next scan strictly after this clean finishes
+                else: self.step_batch()
             elif task in ["ocr", "transparency"]:
                 mask_q = self.canvas.mask if is_active else self.image_sessions[source_path]["mask"]
                 img_cv = self.canvas.cv_img if is_active else self.image_sessions[source_path]["img"]
@@ -622,13 +614,10 @@ class MainWindow(QMainWindow):
             paths = [self.file_list.item(i).data(Qt.UserRole) for i in range(self.file_list.count())]
 
         self.batch_engine.initialize_batch(paths, fmt)
-        get_pool().submit(_run_flush_process, True).result()
-        
         self.is_batching = True
         self.total_lama_tasks += len(paths)
         self.step_batch()
-        
-        self._check_lock_state() # Lock UI instantly!
+        self._check_lock_state()
 
     def step_batch(self):
         path = self.batch_engine.get_next()
@@ -648,18 +637,14 @@ class MainWindow(QMainWindow):
                     }
                     self.image_sessions[path]["mask"].fill(Qt.transparent)
 
-            # --- Check if this is the live active canvas ---
             is_active = (path == self.current_img_path)
 
-            # Send to queue based on scan mode
             if self.batch_scan_type == "none":
-                # Immediately save the current progress without queueing AI tasks
                 img_cv = self.canvas.cv_img if is_active else self.image_sessions[path]["img"]
                 self.total_lama_tasks -= 1
                 
                 self.page_states[path] = PageState.READY
                 self.file_list.update_item_state(path, "ready")
-                
                 self._update_queue_ui()
                 
                 is_last = self.batch_engine.save_current(img_cv)
@@ -668,7 +653,6 @@ class MainWindow(QMainWindow):
                 return
                 
             elif self.batch_scan_type == "mask":
-                # Pull from the live canvas if active, otherwise pull from cache
                 mask_q = self.canvas.mask if is_active else self.image_sessions[path]["mask"]
                 img_cv = self.canvas.cv_img if is_active else self.image_sessions[path]["img"]
 
@@ -676,14 +660,10 @@ class MainWindow(QMainWindow):
                 mask_np = np.frombuffer(ptr, np.uint8).reshape((mask_q.height(), mask_q.width(), 4))
                 mask_gray = mask_np[:, :, 3].copy()
 
-                # If using manual masks, skip straight to saving if the mask is empty
                 if not np.any(mask_gray):
                     self.total_lama_tasks -= 1
-                    
-                    # --- Mark successfully skipped page as READY ---
                     self.page_states[path] = PageState.READY
                     self.file_list.update_item_state(path, "ready")
-                    
                     self._update_queue_ui()
                     
                     is_last = self.batch_engine.save_current(img_cv)
@@ -694,14 +674,12 @@ class MainWindow(QMainWindow):
                 t_size = self.t_slider.slider.value() * 512
                 self.enqueue_task("clean", path, img_cv.copy(), mask_gray, t_size)
             else:
-                # Also ensure OCR/Transparency uses live canvas if active
                 img_cv = self.canvas.cv_img if is_active else self.image_sessions[path]["img"]
                 self.enqueue_task(self.batch_scan_type, path, img_cv.copy())
 
     def finalize_batch(self):
         self.is_batching = False
-        get_pool().submit(_run_flush_process, False).result()
-        self._check_lock_state() # Unlock UI instantly!
+        self._check_lock_state()
         
         self.setCursor(Qt.WaitCursor)
         if self.batch_engine.export_format == "photoshop":
@@ -742,7 +720,6 @@ class MainWindow(QMainWindow):
         path_real = it.data(Qt.UserRole)
         if path_real == self.current_img_path: return 
 
-        # cache outgoing image 
         if self.current_img_path and self.canvas.cv_img is not None:
             self.image_sessions[self.current_img_path] = {
                 "img": self.canvas.cv_img.copy(),
@@ -752,7 +729,6 @@ class MainWindow(QMainWindow):
 
         self.current_img_path = path_real
 
-        # restore incoming image 
         if path_real in self.image_sessions:
             session = self.image_sessions[path_real]
             self.history = session["history"]
@@ -760,7 +736,6 @@ class MainWindow(QMainWindow):
             self.canvas.mask = session["mask"].copy()
             self.canvas.update_mask_display()
         else:
-            # load fresh from hard drive
             img_data = np.fromfile(path_real, dtype=np.uint8)
             img = cv2.imdecode(img_data, cv2.IMREAD_UNCHANGED)
 
@@ -772,7 +747,6 @@ class MainWindow(QMainWindow):
                 self.history = HistoryManager(Config.MAX_HISTORY)
                 self.canvas.set_image(img)
                 
-                # Pre-populate session immediately so background tasks can hit it safely
                 self.image_sessions[path_real] = {
                     "img": img.copy(),
                     "mask": self.canvas.mask.copy(),
@@ -782,7 +756,6 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Load Error", f"The file is corrupted or cannot be processed:\n{os.path.basename(path_real)}")
                 logger.error(f"Failed to decode image: {path_real}")
                 
-        # --- Safely lock/unlock UI based on background state upon clicking ---
         self._check_lock_state()
 
     def on_export(self, fmt):

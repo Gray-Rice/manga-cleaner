@@ -11,7 +11,7 @@ from src.utils.logger import logger
 class AIManager:
     _ocr_engine = None
     _lama_engine = None
-    _persistent_mode = False
+    _persistent_mode = True
 
     @staticmethod
     def set_persistence(enabled: bool):
@@ -21,14 +21,10 @@ class AIManager:
 
     @staticmethod
     def get_ocr():
-        if not AIManager._persistent_mode:
-            if AIManager._lama_engine is not None:
-                AIManager._lama_engine = None
-                gc.collect()
-
         if AIManager._ocr_engine is None:
             path = Paths.get_model("ocr.onnx")
             if os.path.exists(path):
+                logger.info(f"[+] Lazy loading OCR model into VRAM: {path}")
                 AIManager._ocr_engine = ONNXEngine(path)
             else:
                 logger.error(f"[X] OCR Model Missing: {path}")
@@ -36,14 +32,10 @@ class AIManager:
 
     @staticmethod
     def get_lama():
-        if not AIManager._persistent_mode:
-            if AIManager._ocr_engine is not None:
-                AIManager._ocr_engine = None
-                gc.collect()
-
         if AIManager._lama_engine is None:
             path = Paths.get_model("lama.onnx")
             if os.path.exists(path):
+                logger.info(f"[+] Lazy loading LaMa model into VRAM: {path}")
                 AIManager._lama_engine = ONNXEngine(path)
             else:
                 logger.error(f"[X] LaMa Model Missing: {path}")
