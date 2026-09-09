@@ -138,6 +138,8 @@ cp -R .\models\ .\dist\MangaCleaner_CPU\models
 ```
 
 **3. Linux Compilation:**
+
+Change spec to `MangaCleaner_GPU_linux.spec` for GPU acceleration, currently works only for nvidia gpus.
 ```bash
 docker run --rm -v $(pwd):/workspace -w /workspace python:3.12-bookworm bash -c "
   apt-get update && apt-get install -y libgl1 libglib2.0-0 zip
