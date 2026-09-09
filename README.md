@@ -14,10 +14,24 @@ Building upon the modular "Studio" engine introduced in v3.0.0, **Manga Cleaner 
 *Featuring the Obsidian Dark Theme, the new two-column tool layout, and live file-queue locking.*
 
 ---
+## 🎓 Installation & Setup Tutorial
 
-## 🎓 Tutorial  
+For the recommended installation and setup instructions, see the **[Running from Source](#-running-from-source)** section below.
 
-[![Watch the video](https://img.youtube.com/vi/9psnwpJG3aE/hqdefault.jpg)](https://www.youtube.com/embed/9psnwpJG3aE)  
+This includes instructions for:
+
+* Linux users with NVIDIA GPUs — **recommended**
+* CPU-only installations
+* Downloading and setting up the required AI models
+* Running Manga Cleaner directly from the repository
+
+### 🎥 Video Tutorial
+
+Prefer a visual walkthrough? You can follow the video tutorial instead:
+
+[![Watch the Video Tutorial](https://img.youtube.com/vi/9psnwpJG3aE/hqdefault.jpg)](https://www.youtube.com/embed/9psnwpJG3aE)  
+
+The video provides a step-by-step walkthrough of setting up and using Manga Cleaner.
 
 ---
 
@@ -119,35 +133,109 @@ This project is built to empower the scanlation community. I want this tool to h
 
 
 ---
+## 🚀 Running from Source
 
-## ⚙️ Development & Compilation (Source Only)
+Running Manga Cleaner directly from the repository is the **recommended method for Linux users with NVIDIA GPUs**. The source build allows ONNX Runtime to use the CUDA libraries provided through Python packages without requiring a system-wide CUDA toolkit configuration.
 
-**1. Clone the Repository:**
+### 1. Clone the Repository
+
 ```bash
-git clone [https://github.com/NeTRuNNeRGLiTCH/manga-cleaner.git](https://github.com/NeTRuNNeRGLiTCH/manga-cleaner.git)
+git clone https://github.com/NeTRuNNeRGLiTCH/manga-cleaner.git
 cd manga-cleaner
 ```
 
-**2. Windows Compilation:**
+### 2. Download the AI Models
+
+Download `models.zip` from the latest release and extract it into the repository root:
+
+```text
+manga-cleaner/
+├── models/
+├── src/
+├── assets/
+└── main.py
+```
+
+The `models.zip` file is available in the project's [Releases](https://github.com/NeTRuNNeRGLiTCH/manga-cleaner/releases).
+
+### 3. Linux — NVIDIA GPU
+
+Create a virtual environment and install the Linux GPU dependencies:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+
+pip install -r requirements_linux_gpu.txt
+```
+
+Then launch the application:
+
+```bash
+python main.py
+```
+
+Manga Cleaner will automatically use the NVIDIA GPU through ONNX Runtime's `CUDAExecutionProvider` when available.
+
+> **Recommended for Linux NVIDIA users:** Running directly from source is currently preferred over the packaged Linux GPU build. It provides a simpler dependency environment and allows the CUDA/cuDNN libraries installed through pip to be loaded directly by ONNX Runtime.
+
+### 4. CPU / Other Platforms
+
+For CPU-only usage, use the appropriate platform requirements and launch the application normally:
+
+```bash
+python main.py
+```
+
+The application will fall back to the CPU execution provider when CUDA is unavailable.
+
+---
+
+## ⚙️ Development & Compilation (Source Only)
+
+The following instructions are intended for developers who want to create distributable builds from the source.
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/NeTRuNNeRGLiTCH/manga-cleaner.git
+cd manga-cleaner
+```
+
+### 2. Windows Compilation
+
 ```cmd
 python -m venv venv
+
 .\venv\Scripts\activate
+
 pip install -r requirements.txt pyinstaller
+
 pyinstaller MangaCleaner_CPU_clean.spec --noconfirm --clean
+
 cp -R .\models\ .\dist\MangaCleaner_CPU\models
 ```
 
-**3. Linux Compilation:**
+### 3. Linux Compilation
+
+The Linux GPU build uses `MangaCleaner_GPU_linux.spec` instead and currently supports NVIDIA GPUs with CUDA.
+
 ```bash
 docker run --rm -v $(pwd):/workspace -w /workspace python:3.12-bookworm bash -c "
+
   apt-get update && apt-get install -y libgl1 libglib2.0-0 zip
+
   python -m venv venv
+
   source venv/bin/activate
-  pip install -r requirements.txt pyinstaller
+
+  pip install -r requirements_linux_gpu.txt pyinstaller
 
   pyinstaller --clean --noconfirm MangaCleaner_CPU_linux.spec
 
   chown -R $(id -u):$(id -g) dist/ build/
+
 "
-cp -r ./models/ ./dist/MangaCleaner_CPU/models/
+
+cp -r ./models/ ./dist/MangaCleaner_GPU/models/
 ```

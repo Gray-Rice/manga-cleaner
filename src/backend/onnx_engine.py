@@ -9,6 +9,9 @@ class ONNXEngine:
     def __init__(self, model_path):
         import onnxruntime as ort
 
+        # Preload DLLs to avoid runtime errors on Linux when using CUDA (CuBlas and CuDNN are troublesome)
+        ort.preload_dlls()
+        
         providers = ort.get_available_providers()
         
         sess_opt = ort.SessionOptions()

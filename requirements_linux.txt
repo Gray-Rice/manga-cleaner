@@ -1,0 +1,12 @@
+nvidia-cuda-runtime
+nvidia-cudnn-cu13
+nvidia-cufft
+nvidia-curand
+nvidia-nvjitlink
+onnxruntime-gpu
+opencv-python
+pyinstaller
+PySide6
+PySide6_Addons
+PySide6_Essentials
+psutil 
