@@ -2,7 +2,7 @@ import os
 import PySide6.QtSvg 
 from PySide6.QtWidgets import (QListWidget, QListWidgetItem, QWidget, QVBoxLayout, 
                              QPushButton, QLabel, QFrame, QSlider, QHBoxLayout,
-                             QStyledItemDelegate, QGridLayout)
+                             QStyledItemDelegate, QGridLayout, QComboBox, QDialog)
 from PySide6.QtCore import Qt, QRect
 from PySide6.QtGui import QIcon
 from src.utils.config import Config
@@ -158,3 +158,207 @@ class LabeledSlider(QWidget):
             self.display.setText(f"{self.base_label}: {val * 512}px")
         else:
             self.display.setText(f"{self.base_label}: {val}{self.suffix}")
+
+
+#/////////////////////////////////#
+#    EXPORT DIALOG                #
+#/////////////////////////////////#
+
+class ExportDialog(QDialog):
+    """Modal dialog for selecting export format and quality/compression settings."""
+    
+    def __init__(self, parent=None, default_format="jpg", default_jpg_quality=95, default_png_compression=6):
+        super().__init__(parent)
+        self.setWindowTitle("Export Image")
+        self.setFixedWidth(360)
+        self.setStyleSheet(f"background: {Config.COLOR_PANEL}; color: {Config.COLOR_TEXT};")
+        
+        self.selected_format = default_format
+        self.selected_quality = default_jpg_quality if default_format == "jpg" else default_png_compression
+        self.result = None
+        
+        self._setup_ui()
+        self._update_quality_controls()
+        
+    def _setup_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 20, 20, 20)
+        lay.setSpacing(16)
+        
+        # Format selector
+        fmt_lay = QHBoxLayout()
+        fmt_lbl = QLabel("FORMAT")
+        fmt_lbl.setStyleSheet(f"color: {Config.COLOR_TEXT_DIM}; font-size: 10px; font-weight: bold;")
+        fmt_lay.addWidget(fmt_lbl)
+        fmt_lay.addStretch()
+        
+        self.fmt_combo = QComboBox()
+        self.fmt_combo.addItems(["JPG", "PNG"])
+        self.fmt_combo.setCurrentText(self.selected_format.upper())
+        self.fmt_combo.currentTextChanged.connect(self._on_format_changed)
+        self.fmt_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: {Config.COLOR_BG};
+                border: 1px solid #2a2a32;
+                border-radius: 4px;
+                padding: 6px 10px;
+                color: {Config.COLOR_TEXT};
+                font-size: 12px;
+                min-width: 100px;
+            }}
+            QComboBox:hover {{
+                border-color: {Config.COLOR_ACCENT};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+            }}
+            QComboBox QAbstractItemView {{
+                background: {Config.COLOR_PANEL};
+                border: 1px solid #2a2a32;
+                selection-background-color: {Config.COLOR_ACCENT};
+                color: {Config.COLOR_TEXT};
+            }}
+        """)
+        fmt_lay.addWidget(self.fmt_combo)
+        lay.addLayout(fmt_lay)
+        
+        # Quality/Compression controls container
+        self.quality_container = QWidget()
+        self.quality_lay = QVBoxLayout(self.quality_container)
+        self.quality_lay.setContentsMargins(0, 0, 0, 0)
+        self.quality_lay.setSpacing(8)
+        lay.addWidget(self.quality_container)
+        
+        # Buttons
+        btn_lay = QHBoxLayout()
+        btn_lay.addStretch()
+        
+        self.btn_cancel = QPushButton("CANCEL")
+        self.btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                background: {Config.COLOR_BG};
+                border: 1px solid #2a2a32;
+                border-radius: 4px;
+                padding: 8px 20px;
+                color: {Config.COLOR_TEXT};
+                font-weight: bold;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                background: #25252e;
+                color: #ffffff;
+            }}
+        """)
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_lay.addWidget(self.btn_cancel)
+        
+        self.btn_export = QPushButton("EXPORT")
+        self.btn_export.setObjectName("PrimaryBtn")
+        self.btn_export.setStyleSheet(f"""
+            #PrimaryBtn {{
+                background-color: {Config.COLOR_ACCENT};
+                color: #000000;
+                border: none;
+                font-size: 12px;
+                padding: 8px 24px;
+                border-radius: 4px;
+            }}
+            #PrimaryBtn:hover {{
+                background-color: #33e0ff;
+            }}
+        """)
+        self.btn_export.clicked.connect(self.accept)
+        btn_lay.addWidget(self.btn_export)
+        
+        lay.addLayout(btn_lay)
+        
+    def _on_format_changed(self, text):
+        self.selected_format = text.lower()
+        self._update_quality_controls()
+        
+    def _update_quality_controls(self):
+        # Clear existing controls
+        while self.quality_lay.count():
+            item = self.quality_lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        if self.selected_format == "jpg":
+            # JPG Quality slider (1-100)
+            lbl = QLabel("QUALITY")
+            lbl.setStyleSheet(f"color: {Config.COLOR_TEXT_DIM}; font-size: 10px; font-weight: bold;")
+            self.quality_lay.addWidget(lbl)
+            
+            self.quality_slider = QSlider(Qt.Horizontal)
+            self.quality_slider.setRange(1, 100)
+            self.quality_slider.setValue(self.selected_quality)
+            self.quality_slider.valueChanged.connect(self._on_quality_changed)
+            self.quality_slider.setStyleSheet(f"""
+                QSlider::groove:horizontal {{
+                    border: 1px solid #2a2a32;
+                    height: 4px;
+                    background: {Config.COLOR_BG};
+                    margin: 2px 0;
+                }}
+                QSlider::handle:horizontal {{
+                    background: {Config.COLOR_ACCENT};
+                    border: 1px solid {Config.COLOR_ACCENT};
+                    width: 14px;
+                    height: 14px;
+                    margin: -6px 0;
+                    border-radius: 7px;
+                }}
+            """)
+            self.quality_lay.addWidget(self.quality_slider)
+            
+            self.quality_value_lbl = QLabel(f"Quality: {self.selected_quality}% (Higher = better quality, larger file)")
+            self.quality_value_lbl.setStyleSheet(f"color: {Config.COLOR_TEXT_DIM}; font-size: 10px;")
+            self.quality_lay.addWidget(self.quality_value_lbl)
+            
+        else:  # PNG
+            # PNG Compression slider (0-9)
+            lbl = QLabel("COMPRESSION")
+            lbl.setStyleSheet(f"color: {Config.COLOR_TEXT_DIM}; font-size: 10px; font-weight: bold;")
+            self.quality_lay.addWidget(lbl)
+            
+            self.quality_slider = QSlider(Qt.Horizontal)
+            self.quality_slider.setRange(0, 9)
+            self.quality_slider.setValue(self.selected_quality)
+            self.quality_slider.valueChanged.connect(self._on_quality_changed)
+            self.quality_slider.setStyleSheet(f"""
+                QSlider::groove:horizontal {{
+                    border: 1px solid #2a2a32;
+                    height: 4px;
+                    background: {Config.COLOR_BG};
+                    margin: 2px 0;
+                }}
+                QSlider::handle:horizontal {{
+                    background: {Config.COLOR_ACCENT};
+                    border: 1px solid {Config.COLOR_ACCENT};
+                    width: 14px;
+                    height: 14px;
+                    margin: -6px 0;
+                    border-radius: 7px;
+                }}
+            """)
+            self.quality_lay.addWidget(self.quality_slider)
+            
+            self.quality_value_lbl = QLabel(f"Compression: {self.selected_quality} (Higher = smaller file, slower save)")
+            self.quality_value_lbl.setStyleSheet(f"color: {Config.COLOR_TEXT_DIM}; font-size: 10px;")
+            self.quality_lay.addWidget(self.quality_value_lbl)
+            
+    def _on_quality_changed(self, value):
+        self.selected_quality = value
+        if self.selected_format == "jpg":
+            self.quality_value_lbl.setText(f"Quality: {value}% (Higher = better quality, larger file)")
+        else:
+            self.quality_value_lbl.setText(f"Compression: {value} (Higher = smaller file, slower save)")
+            
+    def accept(self):
+        self.result = (self.selected_format, self.selected_quality)
+        super().accept()
+        
+    def reject(self):
+        self.result = None
+        super().reject()
