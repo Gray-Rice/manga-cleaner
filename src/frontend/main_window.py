@@ -4,11 +4,11 @@ import numpy as np
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QPushButton, QFrame, QSplitter, QFileDialog,
                              QMenu, QMessageBox, QGraphicsView, QProgressBar, QInputDialog,
-                             QDialog, QComboBox, QDialogButtonBox, QFormLayout, QCheckBox)
+                             QDialog, QComboBox, QDialogButtonBox, QFormLayout, QCheckBox, QSlider)
 from PySide6.QtGui import QShortcut, QKeySequence, QImage, QPainterPath
 from PySide6.QtCore import Qt, QTimer, QThread
 from enum import Enum, auto
-from src.frontend.widgets import FileListWidget, ToolGroup, LabeledSlider, HardwareMonitor
+from src.frontend.widgets import FileListWidget, ToolGroup, LabeledSlider, HardwareMonitor, ExportDialog
 from src.frontend.canvas import MangaCanvas
 from src.frontend.help_system import HelpSystem
 from src.utils.system_info import SystemMonitor
@@ -110,12 +110,9 @@ class MainWindow(QMainWindow):
         ed_menu.addAction("Photopea (Web)").triggered.connect(lambda: self.on_editor_bridge("photopea"))
         self.btn_editor.setMenu(ed_menu)
         
-        self.btn_export = QPushButton("EXPORT ▼")
+        self.btn_export = QPushButton("EXPORT")
         self.btn_export.setObjectName("PrimaryBtn")
-        exp_menu = QMenu(self)
-        exp_menu.addAction("Export as JPG").triggered.connect(lambda: self.on_export("jpg"))
-        exp_menu.addAction("Export as PNG").triggered.connect(lambda: self.on_export("png"))
-        self.btn_export.setMenu(exp_menu)
+        self.btn_export.clicked.connect(self.show_export_dialog)
 
         nav_lay.addWidget(title)
         nav_lay.addStretch()
@@ -595,7 +592,7 @@ class MainWindow(QMainWindow):
         if dialog.exec() != QDialog.Accepted:
             return
 
-        scan_choice, fmt = dialog.get_results()
+        scan_choice, fmt, quality = dialog.get_results()
         if scan_choice == "Transparency Scan": self.batch_scan_type = "transparency"
         elif scan_choice == "Mask": self.batch_scan_type = "mask"
         elif scan_choice == "none": self.batch_scan_type = "none"
@@ -613,7 +610,7 @@ class MainWindow(QMainWindow):
             self.chk_all.setChecked(True)
             paths = [self.file_list.item(i).data(Qt.UserRole) for i in range(self.file_list.count())]
 
-        self.batch_engine.initialize_batch(paths, fmt)
+        self.batch_engine.initialize_batch(paths, fmt, quality)
         self.is_batching = True
         self.total_lama_tasks += len(paths)
         self.step_batch()
@@ -758,21 +755,80 @@ class MainWindow(QMainWindow):
                 
         self._check_lock_state()
 
-    def on_export(self, fmt):
-        if self.canvas.cv_img is None: return
-        path, _ = QFileDialog.getSaveFileName(self, "Export", "", f"{fmt.upper()} (*.{fmt})")
-        if path:
-            if len(self.canvas.cv_img.shape) == 3 and self.canvas.cv_img.shape[2] == 4:
-                img_out = cv2.cvtColor(self.canvas.cv_img, cv2.COLOR_RGBA2BGRA)
-                if fmt.lower() in ["jpg", "jpeg"]:
-                    img_out = cv2.cvtColor(img_out, cv2.COLOR_BGRA2BGR)
+    def show_export_dialog(self):
+        """Show the export dialog with format and quality options."""
+        if self.canvas.cv_img is None:
+            return
+            
+        # Load saved export settings
+        settings = Config.load_export_settings()
+        default_format = settings.get("format", "jpg")
+        default_jpg_quality = settings.get("jpg_quality", Config.DEFAULT_JPG_QUALITY)
+        default_png_compression = settings.get("png_compression", Config.DEFAULT_PNG_COMPRESSION)
+        
+        dialog = ExportDialog(
+            self,
+            default_format=default_format,
+            default_jpg_quality=default_jpg_quality,
+            default_png_compression=default_png_compression
+        )
+        
+        if dialog.exec() == QDialog.Accepted:
+            fmt, quality = dialog.result
+            # Save settings for next time
+            if fmt == "jpg":
+                Config.save_export_settings(fmt, jpg_quality=quality)
             else:
-                img_out = cv2.cvtColor(self.canvas.cv_img, cv2.COLOR_RGB2BGR)
-                
-            ext = os.path.splitext(path)[1]
-            is_success, im_buf_arr = cv2.imencode(ext, img_out)
-            if is_success:
-                im_buf_arr.tofile(path)
+                Config.save_export_settings(fmt, png_compression=quality)
+            self.on_export(fmt, quality)
+
+    def on_export(self, fmt, quality=None):
+        if self.canvas.cv_img is None: return
+        
+        # Use default quality if not provided
+        if quality is None:
+            if fmt == "jpg":
+                quality = Config.DEFAULT_JPG_QUALITY
+            else:
+                quality = Config.DEFAULT_PNG_COMPRESSION
+        
+        # File dialog without extension filter - user enters base name only
+        path, _ = QFileDialog.getSaveFileName(self, f"Export as {fmt.upper()}", "", "All Files (*)")
+        if not path:
+            return
+            
+        # App controls the extension - dropdown selection takes precedence
+        # Remove any existing extension and append the selected format
+        base_path = os.path.splitext(path)[0]
+        final_path = f"{base_path}.{fmt}"
+        
+        # Convert image based on format and alpha channel
+        if len(self.canvas.cv_img.shape) == 3 and self.canvas.cv_img.shape[2] == 4:
+            img_out = cv2.cvtColor(self.canvas.cv_img, cv2.COLOR_RGBA2BGRA)
+            if fmt.lower() in ["jpg", "jpeg"]:
+                img_out = cv2.cvtColor(img_out, cv2.COLOR_BGRA2BGR)
+        else:
+            img_out = cv2.cvtColor(self.canvas.cv_img, cv2.COLOR_RGB2BGR)
+            
+        # Encode with quality/compression parameters
+        ext = f".{fmt}"
+        if fmt.lower() in ["jpg", "jpeg"]:
+            params = [cv2.IMWRITE_JPEG_QUALITY, quality]
+        else:
+            params = [cv2.IMWRITE_PNG_COMPRESSION, quality]
+            
+        try:
+            is_success, im_buf_arr = cv2.imencode(ext, img_out, params)
+        except cv2.error as e:
+            logger.error(f"cv2.imencode error: {e}")
+            is_success = False
+            
+        if is_success:
+            im_buf_arr.tofile(final_path)
+            logger.info(f"Exported: {final_path} ({fmt.upper()}, quality={quality})")
+        else:
+            QMessageBox.warning(self, "Export Error", f"Could not encode the image as {fmt.upper()}.")
+            logger.error(f"Failed to encode export: {final_path}")
 
     def on_editor_bridge(self, target="photoshop"):
         if self.canvas.cv_img is None or not self.current_img_path: return
@@ -811,6 +867,7 @@ class BatchSetupDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Batch Setup")
         self.setStyleSheet(f"background-color: {Config.COLOR_PANEL}; color: {Config.COLOR_TEXT};")
+        self.setFixedWidth(400)
 
         self.scan_mode = QComboBox()
         self.scan_mode.addItems(["none", "Mask", "OCR Scan", "Transparency Scan"])
@@ -819,6 +876,50 @@ class BatchSetupDialog(QDialog):
         self.export_fmt = QComboBox()
         self.export_fmt.addItems(["none", "png", "jpg", "photoshop", "photopea"])
         self.export_fmt.setStyleSheet(f"background-color: {Config.COLOR_BG}; border: 1px solid #2a2a32; padding: 4px;")
+        self.export_fmt.currentTextChanged.connect(self._on_format_changed)
+
+        # Quality/Compression controls
+        self.quality_container = QWidget()
+        self.quality_lay = QVBoxLayout(self.quality_container)
+        self.quality_lay.setContentsMargins(0, 0, 0, 0)
+        self.quality_lay.setSpacing(8)
+        
+        self.quality_slider = QSlider(Qt.Horizontal)
+        self.quality_slider.valueChanged.connect(self._on_quality_changed)
+        self.quality_slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                border: 1px solid #2a2a32;
+                height: 4px;
+                background: {Config.COLOR_BG};
+                margin: 2px 0;
+            }}
+            QSlider::handle:horizontal {{
+                background: {Config.COLOR_ACCENT};
+                border: 1px solid {Config.COLOR_ACCENT};
+                width: 14px;
+                height: 14px;
+                margin: -6px 0;
+                border-radius: 7px;
+            }}
+        """)
+        
+        self.quality_value_lbl = QLabel("")
+        self.quality_value_lbl.setStyleSheet(f"color: {Config.COLOR_TEXT_DIM}; font-size: 10px;")
+        
+        self.quality_lay.addWidget(self.quality_slider)
+        self.quality_lay.addWidget(self.quality_value_lbl)
+        
+        # Load saved settings
+        settings = Config.load_export_settings()
+        default_format = settings.get("format", "jpg")
+        default_jpg_quality = settings.get("jpg_quality", Config.DEFAULT_JPG_QUALITY)
+        default_png_compression = settings.get("png_compression", Config.DEFAULT_PNG_COMPRESSION)
+        
+        # Set initial format and quality
+        index = self.export_fmt.findText(default_format)
+        if index >= 0:
+            self.export_fmt.setCurrentIndex(index)
+        self._update_quality_controls(default_format, default_jpg_quality, default_png_compression)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
@@ -828,7 +929,90 @@ class BatchSetupDialog(QDialog):
         layout = QFormLayout(self)
         layout.addRow("Scan Mode:", self.scan_mode)
         layout.addRow("Export Format:", self.export_fmt)
+        layout.addRow("Quality/Compression:", self.quality_container)
         layout.addWidget(buttons)
 
+    def _on_format_changed(self, text):
+        self._update_quality_controls(text.lower())
+        
+    def _update_quality_controls(self, fmt, jpg_quality=None, png_compression=None):
+        # Clear existing controls
+        while self.quality_lay.count():
+            item = self.quality_lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        if fmt in ["jpg", "jpeg"]:
+            self.quality_slider = QSlider(Qt.Horizontal)
+            self.quality_slider.setRange(1, 100)
+            self.quality_slider.setValue(jpg_quality if jpg_quality is not None else Config.DEFAULT_JPG_QUALITY)
+            self.quality_slider.valueChanged.connect(self._on_quality_changed)
+            self.quality_slider.setStyleSheet(f"""
+                QSlider::groove:horizontal {{
+                    border: 1px solid #2a2a32;
+                    height: 4px;
+                    background: {Config.COLOR_BG};
+                    margin: 2px 0;
+                }}
+                QSlider::handle:horizontal {{
+                    background: {Config.COLOR_ACCENT};
+                    border: 1px solid {Config.COLOR_ACCENT};
+                    width: 14px;
+                    height: 14px;
+                    margin: -6px 0;
+                    border-radius: 7px;
+                }}
+            """)
+            self.quality_lay.addWidget(self.quality_slider)
+            
+            self.quality_value_lbl = QLabel(f"Quality: {self.quality_slider.value()}% (Higher = better quality, larger file)")
+            self.quality_value_lbl.setStyleSheet(f"color: {Config.COLOR_TEXT_DIM}; font-size: 10px;")
+            self.quality_lay.addWidget(self.quality_value_lbl)
+            
+        elif fmt == "png":
+            self.quality_slider = QSlider(Qt.Horizontal)
+            self.quality_slider.setRange(0, 9)
+            self.quality_slider.setValue(png_compression if png_compression is not None else Config.DEFAULT_PNG_COMPRESSION)
+            self.quality_slider.valueChanged.connect(self._on_quality_changed)
+            self.quality_slider.setStyleSheet(f"""
+                QSlider::groove:horizontal {{
+                    border: 1px solid #2a2a32;
+                    height: 4px;
+                    background: {Config.COLOR_BG};
+                    margin: 2px 0;
+                }}
+                QSlider::handle:horizontal {{
+                    background: {Config.COLOR_ACCENT};
+                    border: 1px solid {Config.COLOR_ACCENT};
+                    width: 14px;
+                    height: 14px;
+                    margin: -6px 0;
+                    border-radius: 7px;
+                }}
+            """)
+            self.quality_lay.addWidget(self.quality_slider)
+            
+            self.quality_value_lbl = QLabel(f"Compression: {self.quality_slider.value()} (Higher = smaller file, slower save)")
+            self.quality_value_lbl.setStyleSheet(f"color: {Config.COLOR_TEXT_DIM}; font-size: 10px;")
+            self.quality_lay.addWidget(self.quality_value_lbl)
+            
+        else:
+            # For "none", "photoshop", "photopea" - no quality setting
+            self.quality_slider = None
+            self.quality_value_lbl = QLabel("Not applicable for this format")
+            self.quality_value_lbl.setStyleSheet(f"color: {Config.COLOR_TEXT_DIM}; font-size: 10px;")
+            self.quality_lay.addWidget(self.quality_value_lbl)
+            
+    def _on_quality_changed(self, value):
+        fmt = self.export_fmt.currentText().lower()
+        if fmt in ["jpg", "jpeg"]:
+            self.quality_value_lbl.setText(f"Quality: {value}% (Higher = better quality, larger file)")
+        elif fmt == "png":
+            self.quality_value_lbl.setText(f"Compression: {value} (Higher = smaller file, slower save)")
+
     def get_results(self):
-        return self.scan_mode.currentText(), self.export_fmt.currentText()
+        fmt = self.export_fmt.currentText()
+        quality = None
+        if fmt in ["jpg", "jpeg", "png"] and self.quality_slider is not None:
+            quality = self.quality_slider.value()
+        return self.scan_mode.currentText(), fmt, quality

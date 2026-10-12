@@ -22,7 +22,12 @@ class Config:
     MAX_HISTORY = 20
     DEFAULT_TILE_WIDTH = 1024 
 
+    # Export settings
+    DEFAULT_JPG_QUALITY = 95      # 1-100
+    DEFAULT_PNG_COMPRESSION = 6   # 0-9
+
     _ID_FILE = os.path.join(Paths.CACHE, "batch_id.json")
+    _EXPORT_SETTINGS_FILE = os.path.join(Paths.CACHE, "export_settings.json")
 
     @staticmethod
     def get_next_batch_id():
@@ -42,3 +47,37 @@ class Config:
             json.dump({"last_id": current_id}, f)
             
         return f"batch_{current_id:05d}"
+
+    @staticmethod
+    def load_export_settings():
+        """Load last-used export format and quality settings."""
+        defaults = {
+            "format": "jpg",
+            "jpg_quality": Config.DEFAULT_JPG_QUALITY,
+            "png_compression": Config.DEFAULT_PNG_COMPRESSION
+        }
+        if os.path.exists(Config._EXPORT_SETTINGS_FILE):
+            try:
+                with open(Config._EXPORT_SETTINGS_FILE, 'r') as f:
+                    data = json.load(f)
+                    # Merge with defaults to handle missing keys
+                    return {**defaults, **data}
+            except:
+                pass
+        return defaults
+
+    @staticmethod
+    def save_export_settings(fmt, jpg_quality=None, png_compression=None):
+        """Save export format and quality settings."""
+        settings = Config.load_export_settings()
+        settings["format"] = fmt
+        if jpg_quality is not None:
+            settings["jpg_quality"] = max(1, min(100, int(jpg_quality)))
+        if png_compression is not None:
+            settings["png_compression"] = max(0, min(9, int(png_compression)))
+        try:
+            with open(Config._EXPORT_SETTINGS_FILE, 'w') as f:
+                json.dump(settings, f)
+        except Exception as e:
+            from src.utils.logger import logger
+            logger.error(f"Failed to save export settings: {e}")

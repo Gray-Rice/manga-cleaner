@@ -18,10 +18,12 @@ class BatchEngine(QObject):
         self.current_index = 0
         self.output_dir = ""
         self.export_format = "jpg"
+        self.export_quality = None
 
-    def initialize_batch(self, file_paths, export_format):
+    def initialize_batch(self, file_paths, export_format, export_quality=None):
         self.files = file_paths
         self.export_format = export_format
+        self.export_quality = export_quality
         self.current_index = 0
         
         batch_id = Config.get_next_batch_id()
@@ -58,8 +60,29 @@ class BatchEngine(QObject):
         else:
             out_bgr = cv2.cvtColor(cv_img, cv2.COLOR_RGB2BGR)
 
-        cv2.imwrite(save_path, out_bgr)
+        # Use imencode with quality parameters for consistency with single export
+        if self.export_quality is None:
+            if ext.lower() in ['jpg', 'jpeg']:
+                self.export_quality = Config.DEFAULT_JPG_QUALITY
+            else:
+                self.export_quality = Config.DEFAULT_PNG_COMPRESSION
+                
+        if ext.lower() in ['jpg', 'jpeg']:
+            params = [cv2.IMWRITE_JPEG_QUALITY, self.export_quality]
+        else:
+            params = [cv2.IMWRITE_PNG_COMPRESSION, self.export_quality]
+            
+        try:
+            is_success, buf = cv2.imencode(f".{ext}", out_bgr, params)
+        except cv2.error as e:
+            logger.error(f"cv2.imencode error: {e}")
+            is_success = False
+            
+        if is_success:
+            buf.tofile(save_path)
+            logger.info(f"[+] Successfully Saved Cleaned: {filename} ({ext.upper()}, quality={self.export_quality})")
+        else:
+            logger.error(f"Failed to encode batch export: {save_path}")
         
-        logger.info(f"[+] Successfully Saved Cleaned: {filename}")
         self.current_index += 1
         return self.current_index >= len(self.files)
